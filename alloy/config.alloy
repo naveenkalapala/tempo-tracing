@@ -1,0 +1,114 @@
+// Discovery: find pods labelled app=log-generator
+discovery.kubernetes "log_generator" {
+  role = "pod"
+  namespaces {
+    names = ["logging"]
+  }
+  selectors {
+    role  = "pod"
+    label = "app=log-generator"
+  }
+}
+
+// Relabelling: set useful meta-labels from pod metadata
+discovery.relabel "log_generator" {
+  targets = discovery.kubernetes.log_generator.targets
+
+  rule {
+    source_labels = ["__meta_kubernetes_namespace"]
+    target_label  = "namespace"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_name"]
+    target_label  = "pod"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_label_app"]
+    target_label  = "app"
+  }
+  rule {
+    source_labels = ["__meta_kubernetes_pod_container_name"]
+    target_label  = "container"
+  }
+}
+
+// Source: tail container logs
+loki.source.kubernetes "log_generator" {
+  targets    = discovery.relabel.log_generator.output
+  forward_to = [loki.process.log_generator.receiver]
+}
+
+// Processing: parse JSON and extract labels
+loki.process "log_generator" {
+  stage.json {
+    expressions = {
+      level            = "level",
+      service_name     = "service",
+      environment      = "environment",
+      region           = "region",
+      cluster          = "cluster",
+      http_method      = "http.method",
+      http_path        = "http.path",
+      http_status_code = "http.status_code",
+      trace_id         = "trace_id",
+      user_id          = "user_id",
+    }
+  }
+
+  stage.labels {
+    values = {
+      level            = "",
+      service_name     = "",
+      environment      = "",
+      region           = "",
+      cluster          = "",
+      http_method      = "",
+      http_status_code = "",
+    }
+  }
+
+  stage.structured_metadata {
+    values = {
+      trace_id  = "",
+      user_id   = "",
+      http_path = "",
+    }
+  }
+
+  forward_to = [loki.write.default.receiver]
+}
+
+// Write: send to Loki
+loki.write "default" {
+  endpoint {
+    url = "http://loki-gateway.logging.svc.cluster.local/loki/api/v1/push"
+  }
+}
+
+// Tracing: receive OTLP from log-generator, forward to Tempo
+otelcol.receiver.otlp "default" {
+  grpc {
+    endpoint = "0.0.0.0:4317"
+  }
+  http {
+    endpoint = "0.0.0.0:4318"
+  }
+  output {
+    traces = [otelcol.processor.batch.default.input]
+  }
+}
+
+otelcol.processor.batch "default" {
+  output {
+    traces = [otelcol.exporter.otlp.tempo.input]
+  }
+}
+
+otelcol.exporter.otlp "tempo" {
+  client {
+    endpoint = "tempo.logging.svc.cluster.local:4317"
+    tls {
+      insecure = true
+    }
+  }
+}

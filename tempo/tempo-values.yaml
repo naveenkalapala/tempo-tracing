@@ -1,0 +1,49 @@
+# Simplified Tempo values - matching working config from k8s-tracing-demo
+tempo:
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 1Gi
+
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: "0.0.0.0:4317"
+        http:
+          endpoint: "0.0.0.0:4318"
+
+  storage:
+    trace:
+      backend: local
+      local:
+        path: /var/tempo/traces
+      wal:
+        path: /var/tempo/wal
+
+  server:
+    http_listen_port: 3200
+
+  metricsGenerator:
+    enabled: true
+    remoteWriteUrl: "http://prometheus-kube-prometheus-prometheus.monitoring.svc.cluster.local:9090/api/v1/write"
+
+  overrides:
+    defaults:
+      metrics_generator:
+        processors:
+          - service-graphs
+          - span-metrics
+          - local-blocks
+
+tempoQuery:
+  enabled: false
+
+gateway:
+  enabled: false
+
+persistence:
+  enabled: false
